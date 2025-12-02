@@ -294,5 +294,83 @@ def gateway_command():
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
 
+# ============================================================
+# API 3: LỌC DỮ LIỆU THEO NGÀY
+# ============================================================
+@app.route('/api/get_history_by_date', methods=['GET'])
+@login_required
+def get_history_by_date():
+    # 1. Lấy ngày từ người dùng gửi lên (Format: YYYY-MM-DD)
+    target_date = request.args.get('date') 
+    
+    if not target_date:
+        return jsonify({"error": "Chưa chọn ngày"}), 400
+
+    # 2. Định nghĩa link API (như cũ)
+    url_turbidity_all = "http://nhungapi.laptrinhpython.net/api/turbidity/all"
+    url_temp_hum_all = "http://nhungapi.laptrinhpython.net/api/temperature_humidity/all"
+    url_water_all = "http://nhungapi.laptrinhpython.net/api/water/all"
+    url_ph_all = "http://nhungapi.laptrinhpython.net/api/ph/all"
+
+    # 3. Hàm fetch (như cũ)
+    def fetch_list(url):
+        try:
+            resp = requests.get(url, timeout=3)
+            return resp.json() if resp.status_code == 200 and isinstance(resp.json(), list) else []
+        except: return []
+
+    # 4. Lấy toàn bộ dữ liệu
+    list_temp_hum = fetch_list(url_temp_hum_all)
+    list_water = fetch_list(url_water_all)
+    list_turbidity = fetch_list(url_turbidity_all)
+    list_ph = fetch_list(url_ph_all)
+
+    # 5. Hàm lọc: Chỉ lấy bản ghi có 'created_at' chứa ngày target_date
+    def filter_by_date(data_list, date_str):
+        filtered = []
+        for item in data_list:
+            # Timestamp thường là "2025-11-20 14:00:00" -> Chỉ cần kiểm tra xem có chứa "2025-11-20" không
+            ts = item.get('created_at', '') or item.get('timestamp', '')
+            if date_str in ts:
+                filtered.append(item)
+        return filtered
+
+    # Lọc dữ liệu
+    data_temp = filter_by_date(list_temp_hum, target_date)
+    data_water = filter_by_date(list_water, target_date)
+    data_tur = filter_by_date(list_turbidity, target_date)
+    data_ph = filter_by_date(list_ph, target_date)
+
+    # 6. Chuẩn bị mảng để vẽ (Logic ghép mảng này tương đối, vì số lượng bản ghi các API có thể lệch nhau)
+    # Để đơn giản, ta lấy danh sách Nhiệt độ làm trục thời gian chuẩn
+    labels = []
+    temps = []
+    hums = []
+    
+    for item in data_temp:
+        ts = item.get('created_at', '') or item.get('timestamp', '')
+        # Chỉ lấy Giờ:Phút:Giây để hiển thị cho gọn
+        if len(ts) > 10: ts = ts[11:19]
+        labels.append(ts)
+        temps.append(item.get('temperature', 0))
+        hums.append(item.get('humidity', 0))
+
+    # Với các thông số khác, nếu số lượng bản ghi không khớp, ta sẽ cắt hoặc map tương đối
+    # Ở đây ta map theo index (cách đơn giản nhất cho đồ án)
+    waters = [x.get('distance', x.get('value', 0)) for x in data_water]
+    turbidities = [x.get('raw', 0) for x in data_tur]
+    phs = [x.get('ph', x.get('value', 0)) for x in data_ph]
+
+    # Cắt cho bằng độ dài của labels để không bị lỗi biểu đồ
+    min_len = len(labels)
+    waters = waters[:min_len]
+    turbidities = turbidities[:min_len]
+    phs = phs[:min_len]
+
+    return jsonify({
+        "labels": labels, "temps": temps, "hums": hums, 
+        "waters": waters, "turbidities": turbidities, "phs": phs
+    })
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
